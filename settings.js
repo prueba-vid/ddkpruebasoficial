@@ -1,0 +1,316 @@
+// --- js/settings.js ---
+
+window.GameConfig = {
+    camDistance: 4.5,
+    camSensitivity: 1.0,
+    resolutionScale: 1.0,
+    shadowsEnabled: false,
+    shadowsPlusEnabled: false,
+    shaderMode: 0, // 0: Desactivado, 1: Normal, 2: Sofisticado
+    domesEnabled: false, // Control de activación de cúpulas
+    selectedDome: 1,     // Cúpula seleccionada (1 a 5)
+    hudEditing: false,
+    showFPS: false,
+    limitFPS: false,
+    targetFPS: 60,
+    nameTagVisibility: 0,
+    showHitboxes: false,
+    flyEnabled: false
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settingsModal = document.getElementById('settingsModal');
+    
+    // --- UI DE MULTIJUGADOR ---
+    const networkRow = document.createElement('div');
+    networkRow.id = 'network-settings-container';
+    networkRow.style.cssText = `margin-bottom: 20px; padding: 12px; background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px solid #444;`;
+    
+    function refreshNetworkUI() {
+        const isConnected = window.Network && window.Network.peer && window.Network.peer.id;
+        networkRow.innerHTML = `
+            <div style="color: #ffd700; font-weight: bold; margin-bottom: 8px; font-size: 13px;">MULTIJUGADOR</div>
+            ${isConnected ? `
+                <div style="color: #00ff00; font-size: 14px;">Tu Sala: <b>${window.Network.peer.id}</b></div>
+            ` : `
+                <div style="display:flex; gap: 5px;">
+                    <input type="text" id="join-room-input" placeholder="Código sala" style="background:#222; color:white; border:1px solid #555; padding:5px; border-radius:4px; width:100px; text-align:center;">
+                    <button id="join-room-btn" style="background:#444; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer;">Unirse</button>
+                </div>
+            `}
+        `;
+        
+        const btn = document.getElementById('join-room-btn');
+        if(btn) {
+            btn.onclick = () => {
+                const cod = document.getElementById('join-room-input').value.trim();
+                if(cod.length === 5 && window.Network) window.Network.unirseASala(cod);
+                else alert("Código inválido");
+            };
+        }
+    }
+    
+    if (settingsModal) {
+        settingsModal.prepend(networkRow);
+        refreshNetworkUI();
+    }
+
+    // --- CONTROL DE CÚPULAS DE CIELO ---
+    if (settingsModal) {
+        const domeContainer = document.createElement('div');
+        domeContainer.id = 'dome-settings-container';
+        domeContainer.style.cssText = `margin-bottom: 15px; padding: 10px; background: rgba(25, 20, 40, 0.6); border-radius: 8px; border: 1px solid #536;`;
+        domeContainer.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="color: #d870ff; font-weight: bold; font-size: 13px;"> Cúpulas Personalizadas</span>
+                <input type="checkbox" id="domeToggle" style="accent-color: #d870ff; cursor: pointer;">
+            </div>
+            <div id="domeSelectorContainer" style="display: none; flex-direction: column; gap: 6px; margin-top: 8px;">
+                <div style="display: flex; justify-content: space-between; font-size: 12px; color: #bbb;">
+                    <span>Cúpula:</span>
+                    <span id="domeNameValue" style="color: #d870ff; font-weight: bold;">1. Cielo Clásico</span>
+                </div>
+                <input type="range" id="domeSlider" min="1" max="5" step="1" value="1" style="width: 100%; accent-color: #d870ff; cursor: pointer;">
+            </div>
+        `;
+
+        const netPos = document.getElementById('network-settings-container');
+        if (netPos && netPos.nextSibling) {
+            settingsModal.insertBefore(domeContainer, netPos.nextSibling);
+        } else {
+            settingsModal.appendChild(domeContainer);
+        }
+
+        const domeToggle = document.getElementById('domeToggle');
+        const domeSelectorContainer = document.getElementById('domeSelectorContainer');
+        const domeSlider = document.getElementById('domeSlider');
+        const domeNameValue = document.getElementById('domeNameValue');
+
+        const domeNames = {
+            1: "1. Cielo Clásico",
+            2: "2. Noche Estrellada",
+            3: "3. Matrix Morada",
+            4: "4. Aurora",
+            5: "5. Agujero Negro (Secreto)"
+        };
+
+        if (domeToggle && domeSelectorContainer && domeSlider && domeNameValue) {
+            domeToggle.addEventListener('change', e => {
+                const isChecked = e.target.checked;
+                window.GameConfig.domesEnabled = isChecked;
+                domeSelectorContainer.style.display = isChecked ? 'flex' : 'none';
+
+                if (window.DomeManager) {
+                    if (isChecked) {
+                        const targetDome = parseInt(domeSlider.value);
+                        window.DomeManager.setDome(targetDome);
+                    } else {
+                        window.DomeManager.clearCurrentDome();
+                    }
+                }
+            });
+
+            domeSlider.addEventListener('input', e => {
+                const val = parseInt(e.target.value);
+                
+                if (window.DomeManager) {
+                    const domeInfo = window.DomeManager.domes.find(d => d.id === val);
+                    
+                    if (domeInfo && domeInfo.requiresPassword) {
+                        const pass = prompt("Esta cúpula está bloqueada. Ingrese la contraseña:");
+                        const success = window.DomeManager.setDome(val, pass);
+                        if (!success) {
+                            domeSlider.value = window.GameConfig.selectedDome;
+                            return;
+                        }
+                    } else {
+                        window.DomeManager.setDome(val);
+                    }
+                }
+
+                window.GameConfig.selectedDome = val;
+                domeNameValue.textContent = domeNames[val] || `Cúpula ${val}`;
+            });
+        }
+    }
+
+    // --- CONTROL DE SHADERS ---
+    if (settingsModal) {
+        const shaderContainer = document.createElement('div');
+        shaderContainer.id = 'shader-settings-container';
+        shaderContainer.style.cssText = `margin-bottom: 15px; padding: 10px; background: rgba(20, 20, 35, 0.5); border-radius: 8px; border: 1px solid #334;`;
+        shaderContainer.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="color: #00e5ff; font-weight: bold; font-size: 13px;">Shaders / Gráficos Avanzados</span>
+                <input type="checkbox" id="shaderToggle" style="accent-color: #00e5ff; cursor: pointer;">
+            </div>
+            <div id="shaderIntensityContainer" style="display: none; flex-direction: column; gap: 6px; margin-top: 8px;">
+                <div style="display: flex; justify-content: space-between; font-size: 12px; color: #bbb;">
+                    <span>Modo de Intensidad:</span>
+                    <span id="shaderIntensityValue" style="color: #00e5ff; font-weight: bold;">Normal</span>
+                </div>
+                <input type="range" id="shaderSlider" min="1" max="2" step="1" value="1" style="width: 100%; accent-color: #00e5ff; cursor: pointer;">
+            </div>
+        `;
+
+        const domePos = document.getElementById('dome-settings-container');
+        if (domePos && domePos.nextSibling) {
+            settingsModal.insertBefore(shaderContainer, domePos.nextSibling);
+        } else {
+            settingsModal.appendChild(shaderContainer);
+        }
+
+        const shaderToggle = document.getElementById('shaderToggle');
+        const shaderIntensityContainer = document.getElementById('shaderIntensityContainer');
+        const shaderSlider = document.getElementById('shaderSlider');
+        const shaderIntensityValue = document.getElementById('shaderIntensityValue');
+
+        const shaderModesList = { 1: "Normal", 2: "Sofisticado" };
+
+        if (shaderToggle && shaderIntensityContainer && shaderSlider && shaderIntensityValue) {
+            shaderToggle.addEventListener('change', e => {
+                const isChecked = e.target.checked;
+                shaderIntensityContainer.style.display = isChecked ? 'flex' : 'none';
+                window.GameConfig.shaderMode = isChecked ? parseInt(shaderSlider.value) : 0;
+                if (window.ShaderEngine) window.ShaderEngine.applySettings(window.GameConfig.shaderMode);
+            });
+
+            shaderSlider.addEventListener('input', e => {
+                const val = parseInt(e.target.value);
+                window.GameConfig.shaderMode = val;
+                shaderIntensityValue.textContent = shaderModesList[val] || "Normal";
+                if (window.ShaderEngine) window.ShaderEngine.applySettings(val);
+            });
+        }
+    }
+
+    const sensSlider = document.getElementById('sensSlider');
+    const sensValue = document.getElementById('sensValue');
+    const fovSlider = document.getElementById('fovSlider');
+    const fovValue = document.getElementById('fovValue');
+    const shadowToggle = document.getElementById('shadowToggle');
+    const shadowPlusToggle = document.getElementById('shadowPlusToggle');
+    const fpsToggle = document.getElementById('fpsToggle');
+    const fpsCounter = document.getElementById('fpsCounter');
+    const editHudToggle = document.getElementById('editHudToggle');
+    const resetHudBtn = document.getElementById('resetHudBtn');
+
+    const fpsLimitToggle = document.getElementById('fpsLimitToggle');
+    const fpsLimitContainer = document.getElementById('fpsLimitContainer');
+    const fpsLimitSlider = document.getElementById('fpsLimitSlider');
+    const fpsLimitValue = document.getElementById('fpsLimitValue');
+    const fpsSteps = [30, 60, 120, 144, 240];
+
+    const nameVisibilitySlider = document.getElementById('nameVisibilitySlider');
+    const nameVisibilityValue = document.getElementById('nameVisibilityValue');
+    const nameVisibilityLabels = {
+        0: "Mostrar todos",
+        1: "Ocultar mi nombre",
+        2: "Ocultar todos",
+        3: "Ocultar solo demás"
+    };
+
+    if (fovSlider) fovSlider.max = "8.0";
+
+    if (settingsBtn && settingsModal) {
+        settingsBtn.addEventListener('click', () => {
+            const isOpen = settingsModal.style.display === 'flex';
+            settingsModal.style.display = isOpen ? 'none' : 'flex';
+            refreshNetworkUI();
+        });
+    }
+
+    if (sensSlider && sensValue) {
+        sensSlider.addEventListener('input', e => {
+            window.GameConfig.camSensitivity = parseFloat(e.target.value);
+            sensValue.textContent = `${Math.round(window.GameConfig.camSensitivity * 100)}%`;
+        });
+    }
+
+    if (fovSlider && fovValue) {
+        fovSlider.addEventListener('input', e => {
+            const val = parseFloat(e.target.value);
+            window.GameConfig.camDistance = val;
+            fovValue.textContent = val.toFixed(1);
+            if (typeof window.updateCameraDistance === 'function') window.updateCameraDistance(val);
+        });
+    }
+
+    // --- CONTROLES UI DE LÍMITE DE FPS ---
+    if (fpsLimitToggle && fpsLimitContainer && fpsLimitSlider && fpsLimitValue) {
+        fpsLimitToggle.addEventListener('change', e => {
+            window.GameConfig.limitFPS = e.target.checked;
+            fpsLimitContainer.style.display = e.target.checked ? 'flex' : 'none';
+        });
+
+        fpsLimitSlider.addEventListener('input', e => {
+            const target = fpsSteps[parseInt(e.target.value)];
+            window.GameConfig.targetFPS = target;
+            fpsLimitValue.textContent = `${target} FPS`;
+        });
+    }
+
+    if (nameVisibilitySlider && nameVisibilityValue) {
+        nameVisibilitySlider.addEventListener('input', e => {
+            const mode = parseInt(e.target.value);
+            window.GameConfig.nameTagVisibility = mode;
+            nameVisibilityValue.textContent = nameVisibilityLabels[mode] || "Mostrar todos";
+            if (typeof window.updateNameTagsVisibility === 'function') window.updateNameTagsVisibility();
+        });
+    }
+
+    if (shadowToggle) {
+        shadowToggle.checked = !!window.GameConfig.shadowsEnabled;
+        shadowToggle.addEventListener('change', e => {
+            const isChecked = e.target.checked;
+            window.GameConfig.shadowsEnabled = isChecked;
+            if (isChecked && shadowPlusToggle) {
+                shadowPlusToggle.checked = false;
+                window.GameConfig.shadowsPlusEnabled = false;
+                if (typeof window.applyShadowsPlusSettings === 'function') window.applyShadowsPlusSettings(false);
+            }
+            if (typeof window.applyShadowSettings === 'function') window.applyShadowSettings(isChecked);
+        });
+    }
+
+    if (shadowPlusToggle) {
+        shadowPlusToggle.checked = !!window.GameConfig.shadowsPlusEnabled;
+        shadowPlusToggle.addEventListener('change', e => {
+            const isChecked = e.target.checked;
+            window.GameConfig.shadowsPlusEnabled = isChecked;
+            if (isChecked && shadowToggle) {
+                shadowToggle.checked = false;
+                window.GameConfig.shadowsEnabled = false;
+                if (typeof window.applyShadowSettings === 'function') window.applyShadowSettings(isChecked);
+            }
+            if (typeof window.applyShadowsPlusSettings === 'function') window.applyShadowsPlusSettings(isChecked);
+        });
+    }
+
+    if (fpsToggle && fpsCounter) {
+        fpsToggle.addEventListener('change', e => {
+            window.GameConfig.showFPS = e.target.checked;
+            fpsCounter.style.display = e.target.checked ? 'block' : 'none';
+        });
+    }
+
+    // --- CONEXIÓN CON EL NUEVO MÓDULO HUD ---
+    if (editHudToggle) {
+        editHudToggle.addEventListener('change', e => {
+            window.GameConfig.hudEditing = e.target.checked;
+            if (window.HUDEditor) {
+                window.HUDEditor.setEditingMode(window.GameConfig.hudEditing);
+            }
+        });
+    }
+
+    if (resetHudBtn) {
+        resetHudBtn.addEventListener('click', () => {
+            if (window.HUDEditor) {
+                window.HUDEditor.resetHUD();
+            }
+        });
+    }
+});
+
