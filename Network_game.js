@@ -2,16 +2,30 @@
 
 window.RemotePlayers = {};
 
+// Sincronización automática una vez que la conexión PeerJS/WebSocket abre el socket
 window.setupNetworkCallbacks = function() {
     if (!window.Network || !window.Network.conexion) return;
 
-    // Enviar datos del personaje local
+    window.Network.conexion.on('open', () => {
+        sendMyPlayerData();
+    });
+
+    // Si ya estaba abierta la conexión antes de llamar setup
+    if (window.Network.conexion.open) {
+        sendMyPlayerData();
+    }
+};
+
+function sendMyPlayerData() {
+    const skinGuardada = localStorage.getItem('selectedSkin') || 'clasica';
+    const skinActual = window.currentCharacter || skinGuardada;
+
     window.Network.enviarDatos({
         type: 'INIT_PLAYER',
-        skin: window.currentCharacter || 'Kai',
+        skin: skinActual,
         name: window.playerUsername || 'Jugador'
     });
-};
+}
 
 window.handleNetworkData = function(data) {
     if (!data || !data.type) return;
@@ -19,10 +33,11 @@ window.handleNetworkData = function(data) {
     switch (data.type) {
         case 'INIT_PLAYER':
             createRemotePlayer(data.skin, data.name);
-            // Responder confirmación para sincronizar ambos lados
+            // Confirmación con mis datos para que el rival me cree en su pantalla
+            const skinGuardada = localStorage.getItem('selectedSkin') || 'clasica';
             window.Network.enviarDatos({
                 type: 'SYNC_RESPONSE',
-                skin: window.currentCharacter || 'Kai',
+                skin: window.currentCharacter || skinGuardada,
                 name: window.playerUsername || 'Jugador'
             });
             break;
@@ -46,10 +61,21 @@ window.handleNetworkData = function(data) {
                 window.spawnAttackHitbox(data.pos, data.rotY, data.width, data.height, data.reach, data.duration);
             }
             break;
-            
+
         case 'PLAYER_ATTACK_ANIM':
             if (window.RemotePlayers['rival'] && typeof triggerHitAnimation === 'function') {
                 triggerHitAnimation(window.RemotePlayers['rival']);
+            }
+            break;
+
+        case 'USE_SKILL':
+            const rival = window.RemotePlayers['rival'];
+            if (rival && typeof executeCharacterSkill === 'function') {
+                if (data.origin) {
+                    rival.position.set(data.origin.x, data.origin.y, data.origin.z);
+                    rival.rotation.y = data.rotY;
+                }
+                executeCharacterSkill(data.skillIndex, data.isPressing, rival, window.scene);
             }
             break;
     }
@@ -62,16 +88,37 @@ function createRemotePlayer(skinName, username) {
         window.scene.remove(window.RemotePlayers['rival']);
     }
 
-    let remoteData;
-    const name = (skinName || 'Kai').toLowerCase();
+    let remoteData = null;
+    const name = (skinName || 'clasica').toLowerCase();
 
-    if (name.includes('arisa') && typeof createArisaSkin === 'function') remoteData = createArisaSkin();
-    else if (name.includes('itsuki') && typeof createItsukiSkin === 'function') remoteData = createItsukiSkin();
-    else if (name.includes('ryu') && typeof createRyuSkin === 'function') remoteData = createRyuSkin();
-    else if (typeof createKaiSkin === 'function') remoteData = createKaiSkin();
-    else remoteData = { playerGroup: new THREE.Group() };
+    // Detección directa de las funciones generadoras de modelos 3D
+    if (name.includes('arisa') && typeof createArisaSkin === 'function') {
+        remoteData = createArisaSkin();
+    } else if (name.includes('itsuki') && typeof createItsukiSkin === 'function') {
+        remoteData = createItsukiSkin();
+    } else if (name.includes('ryu') && typeof createRyuSkin === 'function') {
+        remoteData = createRyuSkin();
+    } else if (name.includes('funetsu') && typeof createFunetsuSkin === 'function') {
+        remoteData = createFunetsuSkin();
+    } else if (name.includes('kenji') && typeof createKenjiSkin === 'function') {
+        remoteData = createKenjiSkin();
+    } else if (typeof createKaiSkin === 'function') {
+        remoteData = createKaiSkin();
+    } else if (typeof window.loadPlayerSkin === 'function') {
+        remoteData = window.loadPlayerSkin(skinName);
+    }
 
-    const remoteGroup = remoteData.playerGroup;
+    // Fallback de seguridad si no hay modelo disponible
+    const remoteGroup = (remoteData && remoteData.playerGroup) ? remoteData.playerGroup : new THREE.Group();
+    
+    // Asignar un color distintivo o modelo visible genérico si falla el generador
+    if (!remoteData || !remoteData.playerGroup) {
+        const geo = new THREE.BoxGeometry(0.8, 1.8, 0.8);
+        const mat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+        const mesh = new THREE.Mesh(geo, mat);
+        remoteGroup.add(mesh);
+    }
+
     remoteGroup.position.set(0, 1, 0);
     window.scene.add(remoteGroup);
 
@@ -85,7 +132,7 @@ function createRemotePlayer(skinName, username) {
 function updateRemotePlayerTransform(data) {
     let rival = window.RemotePlayers['rival'];
     if (!rival) {
-        createRemotePlayer(data.skin || 'Kai', 'Rival');
+        createRemotePlayer(data.skin || 'clasica', data.name || 'Rival');
         rival = window.RemotePlayers['rival'];
     }
     if (rival) {
@@ -96,13 +143,14 @@ function updateRemotePlayerTransform(data) {
 
 window.broadcastLocalTransform = function(playerGroup) {
     if (window.Network && window.Network.conexion && window.Network.conexion.open && playerGroup) {
+        const skinGuardada = localStorage.getItem('selectedSkin') || 'clasica';
         window.Network.enviarDatos({
             type: 'UPDATE_TRANSFORM',
             x: playerGroup.position.x,
             y: playerGroup.position.y,
             z: playerGroup.position.z,
             rotY: playerGroup.rotation.y,
-            skin: window.currentCharacter || 'Kai'
+            skin: window.currentCharacter || skinGuardada
         });
     }
 };
